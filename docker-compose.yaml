@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    environment:
+      - STORAGE_TYPE=mem
+    networks:
+      - otel-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - zipkin
+    environment:
+      - GOGC=80
+    networks:
+      - otel-network
+
+  service-b:
+    build: ./service-b
+    container_name: service-b
+    environment:
+      - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SDK_DISABLED=false
+    depends_on:
+      - otel-collector
+    networks:
+      - otel-network
+    expose:
+      - "8081"
+
+  service-a:
+    build: ./service-a
+    container_name: service-a
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVICE_B_URL=http://service-b:8081
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SDK_DISABLED=false
+    depends_on:
+      - service-b
+      - otel-collector
+    networks:
+      - otel-network
+
+networks:
+  otel-network:
+    driver: bridge
